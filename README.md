@@ -93,9 +93,12 @@ This repository contains the implementation of the Torchsig-VQ-Transformer model
 
 2. Download the pre-trained models from the following Google Drive links:
 
-    VQVAE model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
-    Monai Transformer model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
-    GPT-2 Transformer model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
-    Efficient Net model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
+    - VQVAE model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
+
+    - Monai Transformer model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
+
+    - GPT-2 Transformer model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
+
+    - Efficient Net model: [Download Here](https://drive.google.com/drive/folders/12Yud7KDqDubcSMn2MPEkxR2LdqzZ_sUm?usp=sharing)!
 
 3. After downloading, move all .pt files into the src/SavedModels directory.
