@@ -2,4 +2,6 @@
 /run/src/SavedModels
 /run/lightning_logs
 /run/src/__pycache__
-.ipynb_checkpoints/test-checkpoint.ipynb
+.ipynb_checkpoints/
+/run/.ipynb_checkpoints/
+/run/src/.ipynb_checkpoints/
