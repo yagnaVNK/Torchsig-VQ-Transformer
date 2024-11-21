@@ -11,7 +11,6 @@ from src.Dataset import getDataLoader
 import torch.nn as nn
 from timm.layers.norm_act import BatchNormAct2d
 from torchsummary import summary
-import os
 
 def replace_batchnormact2d_with_batchnorm1d(module):
     """
@@ -62,9 +61,6 @@ def train_classifier(dl_train: DataLoader,
     
     if train_bool:
         #print(summary(example_model.to(device),(2,1024),16,device=device))
-        if (os.path.exists(eff_net_PATH)):
-            print("transfer learning efficient net")
-            example_model.load_state_dict(torch.load(eff_net_PATH))
         trainer.fit(example_model, dl_train, dl_val)
         torch.save(example_model.state_dict(), eff_net_PATH)
         print("trained the model")
@@ -76,7 +72,13 @@ def train_classifier(dl_train: DataLoader,
     
 if __name__ == '__main__':
 
-
+    classes = ["4ask","8pam","16psk","32qam_cross","2fsk","ofdm-256"]
+    iq_samples = 1024
+    samples_per_class= 1000
+    batch_size = 32
+    epochs = 10
+    eff_net_PATH = f'src/SavedModels/efficientNet_epochs_{epochs}.pt'
+    in_channels = 2
 
     dl_train, ds_train, dl_test, ds_test, dl_val, ds_val = getDataLoader(
         classes = classes,
