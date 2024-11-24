@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from generative.networks.nets import DecoderOnlyTransformer
 from src.utils import *
+import torch.nn.functional as F
 
 class MonaiDecoderOnlyModel(nn.Module):
     def __init__(self, d_model=512, nhead=8, num_layers=6, vocab_size=64, max_len=64):
@@ -20,29 +21,41 @@ class MonaiDecoderOnlyModel(nn.Module):
         self.lm_head = nn.Linear(d_model, vocab_size)
 
     
-    def generate(self, idx, max_new_tokens):
-        self.eval()
-        # Initialize generated sequence with idx as a batch
-        batch_size = idx.size(0)
-        generated_sequence = idx.clone().to(device=device)  # Start with given idx of shape (4, 1)
-        print("generating from MONAI transformer")
-        for _ in range(1, max_new_tokens):
-            with torch.no_grad():
-                # Forward pass through the model
-                output = self(generated_sequence)  # Output shape: (batch_size, seq_len, vocab_size)
-                
-                # Get the last token's logits for each sequence in the batch
-                next_tokens = torch.argmax(output[:, -1, :], dim=-1)  # Shape: (batch_size,)
-                
-                # Append the predicted tokens to the sequence
-                next_tokens = next_tokens.unsqueeze(1)  # Shape: (batch_size, 1)
-                generated_sequence = torch.cat([generated_sequence, next_tokens], dim=1)  # Shape: (batch_size, seq_len + 1)
 
-                # Stop if the generated sequence reaches max length
-                if generated_sequence.size(1) >= max_new_tokens:
-                    break
-        
-        return generated_sequence  # Shape: (4, 64)
+    def generate(self, idx, max_new_tokens):
+        """
+        Generate a sequence of tokens based on the initial context `idx`.
+
+        Args:
+            idx (torch.Tensor): Initial context of shape (B, T) with indices.
+            max_new_tokens (int): Number of tokens to generate.
+
+        Returns:
+            torch.Tensor: Generated sequence of shape (B, T + max_new_tokens).
+        """
+        self.eval()  # Ensure the model is in evaluation mode
+
+        with torch.no_grad():  # Disable gradient computation for inference
+            for _ in range(max_new_tokens):
+                # Crop `idx` to the last `block_size` tokens for efficient processing
+                idx_cond = idx[:, -block_size:]
+                
+                # Forward pass to get logits
+                logits = self(idx_cond)
+                
+                # Focus only on the last time step (prediction for the next token)
+                logits = logits[:, -1, :]  # Shape: (B, vocab_size)
+                
+                # Convert logits to probabilities using softmax
+                probs = F.softmax(logits, dim=-1)  # Shape: (B, vocab_size)
+                
+                # Sample the next token from the probability distribution
+                idx_next = torch.multinomial(probs, num_samples=1)  # Shape: (B, 1)
+                
+                # Append the sampled token to the sequence
+                idx = torch.cat((idx, idx_next), dim=1)  # Shape: (B, T + 1)
+
+        return idx
 
     def forward(self, src, tgt=None):
         

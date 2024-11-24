@@ -70,8 +70,8 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(m.parameters(), lr = 1e-3)
     x_train_loader = DataLoader(x_train,batch_size=batch_size)
     y_train_loader = DataLoader(y_train,batch_size=batch_size)
-    epochs = 100
-    learning_rate = 5e-4
+    epochs = 400
+    learning_rate = 1e-4
 
 
     optimizer = torch.optim.AdamW(m.parameters(), lr=learning_rate)

@@ -12,27 +12,8 @@ from src.Dataset import getDataLoader
 import matplotlib.pyplot as plot
 import numpy as np
 
-
-def plot_batch_reconstruction(original_batch, reconstruction_batch, idx, folder):
-    plt.figure(figsize=(12, 12))
-    
-    for i in range(4):
-
-        plt.subplot(4, 2, 2 * i + 1)
-        plt.plot(original_batch[i])
-        plt.title(f'Original Signal {i+1}')
-        
-        plt.subplot(4, 2, 2 * i + 2)
-        plt.plot(reconstruction_batch[i])
-        plt.title(f'Reconstructed Signal {i+1}')
-    
-    plt.tight_layout()
-    plt.savefig(f"{folder}/context_len_{idx}.png")
-    plt.close()
-
-
-
-def plot_generated_reconstructions(reconstructions, labels, folder,idx):
+# Define the plotting function
+def plot_generated_reconstructions(reconstructions, labels, folder, idx, classes):
     # Create the eval folder if it doesn't exist
     os.makedirs(folder, exist_ok=True)
 
@@ -44,14 +25,13 @@ def plot_generated_reconstructions(reconstructions, labels, folder,idx):
     # Create a figure with subplots
     plt.figure(figsize=(18, 6 * rows))  # Adjust the size as needed
 
-
     # Plot each reconstruction in a subplot
     for i, rec in enumerate(reconstructions):
         if rec.nelement() == 0:
             continue  # Skip plotting if the tensor is empty
         ax = plt.subplot(rows, cols, i + 1)
-        ax.scatter(rec[0].cpu().detach().numpy(), rec[1].cpu().detach().numpy(), label=f'Label {labels[i]}')
-        ax.set_title(f'Reconstruction Label {labels[i]}')
+        ax.scatter(rec[0].cpu().detach().numpy(), rec[1].cpu().detach().numpy(), label=classes[labels[i]])
+        ax.set_title(f'{classes[labels[i]]}')
         ax.set_xlabel('Component 1')
         ax.set_ylabel('Component 2')
         ax.legend()
@@ -61,53 +41,55 @@ def plot_generated_reconstructions(reconstructions, labels, folder,idx):
     plt.savefig(os.path.join(folder, f'reconstruction_{idx}_labels_0_to_5.png'))
     plt.close()
 
-
-
 if __name__ == "__main__":
-    
+    # Define the classes
+    classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
+
+    # Load models
     VQVAE = torch.load(VQVAE_PATH).to(device)
     VQVAE.eval()  
     modelTransformer = torch.load(MONAI_TRANSFORMER_MODEL_PATH).to(device)
     modelTransformer.eval()
     modelGPT2 = torch.load(TRANSFORMER_MODEL_PATH).to(device)
     modelGPT2.eval()
-    
+
+    # Load data
     train_dl, ds_train, test_dl, ds_test, val_dl, ds_val = getDataLoader(
-        classes = classes,
-        iq_samples = iq_samples,
-        samples_per_class= samples_per_class,
+        classes=classes,
+        iq_samples=iq_samples,
+        samples_per_class=samples_per_class,
         batch_size=4
     )
   
-    for j in range(0,10):
+    
+
+    # Generate and plot reconstructions for Transformer model
+    for j in range(0, 10):
         all_reconstructions = []
-        labels = list(range(6))
+        labels = list(range(len(classes)))  # Dynamically adjust based on the number of classes
         for i in labels:
-            new_indices = torch.tensor(modelTransformer.generate(torch.tensor([[i]]), max_new_tokens=513), device=device)
-            #print(new_indices[:,1:].shape)
-            reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:,1:]))
-            #print(reconstruction.shape)
+            new_indices = torch.tensor(modelTransformer.generate(torch.tensor([[i]]).to(device), max_new_tokens=513), device=device)
+            reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
             all_reconstructions.append(reconstruction.squeeze()) 
 
-        # Stack all reconstructions into a tensor of shape [6, 2, 1024]
+        # Stack all reconstructions
         all_reconstructions = torch.stack(all_reconstructions)
-        print(all_reconstructions.shape)
-        plot_generated_reconstructions(all_reconstructions, labels, eval_folder,j)
+        #print(all_reconstructions.shape)
+        plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
 
+    # Changing evaluation folder
     eval_folder = f'EvaluationResults/GPT2_results/'
 
-    for j in range(0,10):
+    # Generate and plot reconstructions for GPT2 model
+    for j in range(0, 10):
         all_reconstructions = []
-        labels = list(range(6))
+        labels = list(range(len(classes)))
         for i in labels:
-            new_indices = torch.tensor(modelGPT2.generate(torch.tensor([[i]]), max_new_tokens=513), device=device)
-            #print(new_indices[:,1:].shape)
-            reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:,1:]))
-            #print(reconstruction.shape)
+            new_indices = torch.tensor(modelGPT2.generate(torch.tensor([[i]]).to(device), max_new_tokens=513), device=device)
+            reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
             all_reconstructions.append(reconstruction.squeeze()) 
 
-        # Stack all reconstructions into a tensor of shape [6, 2, 1024]
+        # Stack all reconstructions
         all_reconstructions = torch.stack(all_reconstructions)
-        print(all_reconstructions.shape)
-        plot_generated_reconstructions(all_reconstructions, labels, eval_folder,j)
-
+        #print(all_reconstructions.shape)
+        plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)

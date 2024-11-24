@@ -22,9 +22,9 @@ in_channels = 2
 
 block_size = 512
 vocab_size = codebook_slots
-n_head = 16
-n_layer = 16
-n_embd = 32
+n_head = 8
+n_layer = 8
+n_embd = 16
 dropout = 0.1
 TRANSFORMER_MODEL_PATH = f'src/SavedModels/Transformer_epochs_{epochs}.pt'
 MONAI_TRANSFORMER_MODEL_PATH = f'src/SavedModels/MonaiTransformer_epochs_{epochs}.pt'

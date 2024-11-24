@@ -109,23 +109,23 @@ if __name__ == "__main__":
 
     # Initialize model parameters
     d_model = 64
-    nhead = 16
-    num_layers = 16
+    nhead = 8
+    num_layers = 8
     vocab_size = 64  # Numbers between 0 and 63
     max_len = 513
-    batch_size = 16
+    batch_size = 32
 
     # Initialize model
     m = MonaiDecoderOnlyModel(d_model=d_model, nhead=nhead, num_layers=num_layers, vocab_size=vocab_size, max_len=max_len).to(device)
-    #model = torch.load(MONAI_TRANSFORMER_MODEL_PATH).to(device)
+    m = torch.load(MONAI_TRANSFORMER_MODEL_PATH).to(device)
 
 
-    optimizer = torch.optim.Adam(m.parameters(), lr = 1e-4)
+    optimizer = torch.optim.Adam(m.parameters(), lr = 5e-4)
     x_train_loader = DataLoader(x_train,batch_size=batch_size)
     y_train_loader = DataLoader(y_train,batch_size=batch_size)
 
-    epochs = 100
-    learning_rate = 5e-4
+    epochs = 500
+    learning_rate = 1e-5
     m = m.to(device)
 
 
