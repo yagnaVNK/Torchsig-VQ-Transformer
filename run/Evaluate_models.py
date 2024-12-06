@@ -12,6 +12,142 @@ from src.Dataset import getDataLoader
 import matplotlib.pyplot as plot
 import numpy as np
 
+from top_pr import compute_top_pr as TopPR
+
+
+def compute_metrics(real_dataset_path, fake_dataset_path):
+    """
+    Compute metrics using Top PR framework for real and fake datasets.
+
+    Parameters:
+    - real_dataset_path: Path to the NumPy file containing the real dataset.
+    - fake_dataset_path: Path to the NumPy file containing the fake dataset.
+
+    Returns:
+    - A dictionary containing fidelity, diversity, and Top_F1 metrics.
+    """
+    # Load the datasets
+    real_data = np.load(real_dataset_path)
+    fake_data = np.load(fake_dataset_path)
+
+    # Ensure both datasets are flattened in the signal dimension
+    real_data = real_data.reshape(real_data.shape[0], -1)
+    fake_data = fake_data.reshape(fake_data.shape[0], -1)
+
+    # Compute metrics using TopPR
+    Top_PR = TopPR(
+        real_features=real_data,
+        fake_features=fake_data,
+        alpha=0.1,  # Weight for fidelity and diversity tradeoff
+        kernel="cosine",  # Kernel type
+        random_proj=True,  # Whether to use random projection
+        f1_score=True  # Whether to compute Top_F1
+    )
+
+    # Extract the required metrics
+    fidelity = Top_PR.get("fidelity")
+    diversity = Top_PR.get("diversity")
+    top_f1 = Top_PR.get("Top_F1")
+
+    # Print and return the metrics
+    print(f"Fidelity: {fidelity}, Diversity: {diversity}, Top_F1: {top_f1}")
+    return {"fidelity": fidelity, "diversity": diversity, "Top_F1": top_f1}
+
+def save_torch_dataset_as_numpy(dataset, output_file):
+    """
+    Save a PyTorch Dataset as a NumPy ndarray.
+
+    Parameters:
+    - dataset: A PyTorch Dataset object with tensors to be saved.
+    - output_file: Path to save the dataset as a NumPy file.
+    """
+    # Initialize a list to hold all samples
+    all_samples = []
+    print("converting dataset to numpy array")
+    # Iterate over the dataset to extract tensors
+    for i in tqdm(range(len(dataset))):
+        # Assuming each sample in the dataset is a tuple (data, label)
+        sample, _ = dataset[i]  # Extract only the data
+        all_samples.append(sample.reshape(2048))  # Flatten and convert to numpy array
+
+    # Convert the list of samples to a NumPy array
+    numpy_array = np.array(all_samples)
+    print(f"Dataset shape: {numpy_array.shape}")
+
+    # Save the NumPy array to a file
+    np.save(output_file, numpy_array)
+    print(f"Dataset saved to {output_file}")
+
+
+def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_labels=6, samples_per_label=1000, batch_size=128, signal_length=1024):
+    """
+    Generate a fake dataset using a transformer model and save it as a NumPy array.
+    
+    Parameters:
+    - transformer_model: The trained transformer model for sequence generation.
+    - vqvae_model: The VQVAE model for decoding generated sequences.
+    - output_file: Path to save the final dataset as a NumPy array.
+    - num_labels: Number of labels (classes) to generate samples for.
+    - samples_per_label: Number of samples to generate for each label.
+    - batch_size: Number of samples to generate in parallel for each label.
+    - signal_length: Length of the decoded signal for each sample.
+    """
+    all_samples = []
+    steps_per_label = samples_per_label // batch_size
+    fake_indices = []
+    for label in range(num_labels):
+        print(f"Generating data for label {label}...")
+        for _ in tqdm(range(steps_per_label)):
+            # Create a batch of the same label
+            label_tensor = torch.tensor([[label]] * batch_size).to(device)
+
+            # Generate new indices using the transformer model
+            new_indices = transformer_model.generate(
+                label_tensor,
+                max_new_tokens=signal_length // 2
+            )
+            fake_indices.append(new_indices[:,1:])
+            # Decode the generated indices into signals
+            reconstructions = vqvae_model.decode(vqvae_model.codebook.lookup(new_indices[:, 1:]))
+
+            # Flatten each reconstructed signal and append it to the dataset
+            for rec in reconstructions:
+                all_samples.append(rec.cpu().detach().numpy().flatten())
+    
+    # Convert the list of samples into a NumPy array
+    final_dataset = np.array(all_samples)
+    print(f"Generated dataset shape: {final_dataset.shape}")
+
+    # Save the dataset as a NumPy file
+    np.save(output_file, final_dataset)
+    print(f"Dataset saved to {output_file}")
+    return fake_indices
+
+#Defiing the function to create histograms for the fake datasets
+def plot_codebook_histograms(fake_indices,path,num_classes = 6, num_tokens=512):
+    stacked_tensors = torch.cat(fake_indices)
+    total_elements = stacked_tensors.numel()
+    intermediate_dim = total_elements // (num_classes * num_tokens)
+
+    reshaped_tensor = stacked_tensors.reshape(num_classes, intermediate_dim, num_tokens)
+    classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
+
+    for i in range(reshaped_tensor.shape[0]):
+        data = reshaped_tensor[i].flatten().cpu().numpy()  # Move tensor to CPU before converting to numpy
+        plt.figure(figsize=(10, 6))
+        plt.hist(data, bins=50, color='blue', alpha=0.7)
+        plt.title(f'Histogram for Class: {classes[i]}')
+        plt.xlabel('Values')
+        plt.ylabel('Frequency')
+        plt.grid(True)
+        
+        # Save the plot
+        output_path = os.path.join(path, f"{classes[i]}.png")
+        plt.savefig(output_path)
+        plt.close()  
+
+    pass
+
 # Define the plotting function
 def plot_generated_reconstructions(reconstructions, labels, folder, idx, classes):
     # Create the eval folder if it doesn't exist
@@ -41,6 +177,8 @@ def plot_generated_reconstructions(reconstructions, labels, folder, idx, classes
     plt.savefig(os.path.join(folder, f'reconstruction_{idx}_labels_0_to_5.png'))
     plt.close()
 
+
+
 if __name__ == "__main__":
     # Define the classes
     classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
@@ -63,33 +201,69 @@ if __name__ == "__main__":
   
     
 
-    # Generate and plot reconstructions for Transformer model
-    for j in range(0, 10):
-        all_reconstructions = []
-        labels = list(range(len(classes)))  # Dynamically adjust based on the number of classes
-        for i in labels:
-            new_indices = torch.tensor(modelTransformer.generate(torch.tensor([[i]]).to(device), max_new_tokens=513), device=device)
-            reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
-            all_reconstructions.append(reconstruction.squeeze()) 
+    # # Generate and plot reconstructions for Transformer model
+    # for j in range(0, 10):
+    #     all_reconstructions = []
+    #     labels = list(range(len(classes)))  # Dynamically adjust based on the number of classes
+    #     for i in labels:
+    #         new_indices = torch.tensor(modelTransformer.generate(torch.tensor([[i]]).to(device), max_new_tokens=512), device=device)
+    #         reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
+    #         all_reconstructions.append(reconstruction.squeeze()) 
 
-        # Stack all reconstructions
-        all_reconstructions = torch.stack(all_reconstructions)
-        #print(all_reconstructions.shape)
-        plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
+    #     # Stack all reconstructions
+    #     all_reconstructions = torch.stack(all_reconstructions)
+    #     #print(all_reconstructions.shape)
+    #     plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
 
-    # Changing evaluation folder
-    eval_folder = f'EvaluationResults/GPT2_results/'
+    # # Changing evaluation folder
+    # eval_folder = f'EvaluationResults/GPT2_results/'
 
-    # Generate and plot reconstructions for GPT2 model
-    for j in range(0, 10):
-        all_reconstructions = []
-        labels = list(range(len(classes)))
-        for i in labels:
-            new_indices = torch.tensor(modelGPT2.generate(torch.tensor([[i]]).to(device), max_new_tokens=513), device=device)
-            reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
-            all_reconstructions.append(reconstruction.squeeze()) 
+    # # Generate and plot reconstructions for GPT2 model
+    # for j in range(0, 10):
+    #     all_reconstructions = []
+    #     labels = list(range(len(classes)))
+    #     for i in labels:
+    #         new_indices = torch.tensor(modelGPT2.generate(torch.tensor([[i]]).to(device), max_new_tokens=512), device=device)
+    #         reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
+    #         all_reconstructions.append(reconstruction.squeeze()) 
 
-        # Stack all reconstructions
-        all_reconstructions = torch.stack(all_reconstructions)
-        #print(all_reconstructions.shape)
-        plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
+    #     # Stack all reconstructions
+    #     all_reconstructions = torch.stack(all_reconstructions)
+    #     #print(all_reconstructions.shape)
+    #     plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
+
+
+    real_dataset_path = "src/Saved_datasets/real_dataset.npy"  
+    fake_dataset_path_GPT2 = "src/Saved_datasets/fake_dataset_transformerGPT2.npy" 
+    fake_dataset_path_MONAI = "src/Saved_datasets/fake_dataset_transformerMONAI.npy" 
+
+    GPT2_Histograms_Path = "EvaluationResults/GPT2_results/CodebookHistograms/" 
+    MONAI_Histograms_Path = "EvaluationResults/Monai_results/CodebookHistograms/" 
+
+    # Save ds_train as a NumPy array
+    #save_torch_dataset_as_numpy(ds_train, real_dataset_path)
+
+    fake_indices_GPT2 = generate_fake_dataset(
+        transformer_model=modelGPT2,
+        vqvae_model=VQVAE,
+        output_file=fake_dataset_path_GPT2,
+        num_labels=6,
+        samples_per_label=1000,
+        signal_length=1024
+    )
+    plot_codebook_histograms(fake_indices_GPT2,GPT2_Histograms_Path)
+    #metrics = compute_metrics(real_dataset_path, fake_dataset_path_GPT2)
+    #print("Computed Metrics GPT2:", metrics)
+
+
+    fake_indices_MONAI = generate_fake_dataset(
+        transformer_model=modelTransformer,
+        vqvae_model=VQVAE,
+        output_file=fake_dataset_path_MONAI,
+        num_labels=6,
+        samples_per_label=1000,
+        signal_length=1024
+    )
+    plot_codebook_histograms(fake_indices_MONAI,MONAI_Histograms_Path)
+    #metrics = compute_metrics(real_dataset_path, fake_dataset_path_MONAI)
+    #print("Computed Metrics MONAI:", metrics)
