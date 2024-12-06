@@ -6,3 +6,4 @@
 .ipynb_checkpoints/
 /run/.ipynb_checkpoints/
 /run/src/.ipynb_checkpoints/
+/run/__pycache__
