@@ -124,7 +124,7 @@ if __name__ == "__main__":
     x_train_loader = DataLoader(x_train,batch_size=batch_size)
     y_train_loader = DataLoader(y_train,batch_size=batch_size)
 
-    epochs = 500
+    epochs = 10
     learning_rate = 1e-5
     m = m.to(device)
 

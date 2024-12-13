@@ -79,7 +79,7 @@ def save_torch_dataset_as_numpy(dataset, output_file):
     print(f"Dataset saved to {output_file}")
 
 
-def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_labels=6, samples_per_label=1000, batch_size=128, signal_length=1024):
+def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_labels=6, samples_per_label=500, batch_size=128, signal_length=1024):
     """
     Generate a fake dataset using a transformer model and save it as a NumPy array.
     
@@ -106,7 +106,7 @@ def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_label
                 label_tensor,
                 max_new_tokens=signal_length // 2
             )
-            fake_indices.append(new_indices[:,1:])
+            fake_indices.append(new_indices[:,1:].cpu().numpy())
             # Decode the generated indices into signals
             reconstructions = vqvae_model.decode(vqvae_model.codebook.lookup(new_indices[:, 1:]))
 
@@ -117,10 +117,7 @@ def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_label
     # Convert the list of samples into a NumPy array
     final_dataset = np.array(all_samples)
     print(f"Generated dataset shape: {final_dataset.shape}")
-
-    # Save the dataset as a NumPy file
-    np.save(output_file, final_dataset)
-    print(f"Dataset saved to {output_file}")
+    
     return fake_indices
 
 def plot_codebook_histograms(indices, path, num_classes=6, num_tokens=512):
@@ -142,11 +139,15 @@ def plot_codebook_histograms(indices, path, num_classes=6, num_tokens=512):
 
     for i, class_indices in enumerate(indices_per_class):
         plt.figure(figsize=(10, 6))
-        plt.hist(class_indices, bins=50, color='blue', alpha=0.7)
+        plt.hist(class_indices, bins=64, color='blue', alpha=0.7)
         plt.title(f'Histogram for Class: {classes[i]}')
         plt.xlabel('Values')
         plt.ylabel('Frequency')
         plt.grid(True)
+        
+        outputpath = os.path.join(path, f"Histogram_Class_{classes[i]}.png")
+        plt.savefig(outputpath)
+        plt.close()
 
 
 
@@ -279,8 +280,8 @@ if __name__ == "__main__":
     #     signal_length=1024
     # )
     # plot_codebook_histograms(fake_indices_GPT2,GPT2_Histograms_Path)
-    # #metrics = compute_metrics(real_dataset_path, fake_dataset_path_GPT2)
-    # #print("Computed Metrics GPT2:", metrics)
+    # metrics = compute_metrics(real_dataset_path, fake_dataset_path_GPT2)
+    # print("Computed Metrics GPT2:", metrics)
 
 
     # fake_indices_MONAI = generate_fake_dataset(
@@ -292,8 +293,8 @@ if __name__ == "__main__":
     #     signal_length=1024
     # )
     # plot_codebook_histograms(fake_indices_MONAI,MONAI_Histograms_Path)
-    # #metrics = compute_metrics(real_dataset_path, fake_dataset_path_MONAI)
-    # #print("Computed Metrics MONAI:", metrics)
+    # metrics = compute_metrics(real_dataset_path, fake_dataset_path_MONAI)
+    # print("Computed Metrics MONAI:", metrics)
 
 
     indices = quantize_dataset(VQVAE, ds_test)
