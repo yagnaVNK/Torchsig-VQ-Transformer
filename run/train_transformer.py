@@ -81,8 +81,9 @@ if __name__ == '__main__':
     x_test_loader = DataLoader(x_test,batch_size=batch_size)
     y_test_loader = DataLoader(y_test,batch_size=batch_size)
 
-    
-    m = train_model(m ,x_train_loader,y_train_loader,x_test_loader,y_test_loader, epochs)
+    print(next(iter(x_test_loader)).shape)
+
+    #m = train_model(m ,x_train_loader,y_train_loader,x_test_loader,y_test_loader, epochs)
     torch.save(m,TRANSFORMER_MODEL_PATH)
     context = torch.tensor([[3],[42],[62]]).to(device=device)
     print(m.generate(context, max_new_tokens=513))

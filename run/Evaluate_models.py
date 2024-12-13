@@ -123,30 +123,57 @@ def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_label
     print(f"Dataset saved to {output_file}")
     return fake_indices
 
-#Defiing the function to create histograms for the fake datasets
-def plot_codebook_histograms(fake_indices,path,num_classes = 6, num_tokens=512):
-    stacked_tensors = torch.cat(fake_indices)
-    total_elements = stacked_tensors.numel()
-    intermediate_dim = total_elements // (num_classes * num_tokens)
+def plot_codebook_histograms(indices, path, num_classes=6, num_tokens=512):
+    """
+    Plot histograms of the quantization indices from the VQVAE model.
 
-    reshaped_tensor = stacked_tensors.reshape(num_classes, intermediate_dim, num_tokens)
+    Parameters:
+    - indices: Numpy array of indices obtained from the quantization.
+    - path: Path where the histogram plots will be saved.
+    - num_classes: Number of classes for labeling purposes.
+    - num_tokens: Number of tokens in the VQVAE's codebook.
+    """
+    os.makedirs(path, exist_ok=True)
     classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
 
-    for i in range(reshaped_tensor.shape[0]):
-        data = reshaped_tensor[i].flatten().cpu().numpy()  # Move tensor to CPU before converting to numpy
+    # Assuming indices is a flat list, we need to split it correctly by class
+    # This requires knowing the distribution of indices by class - the following is a generic handler
+    indices_per_class = np.array_split(indices, num_classes)  # Using array_split to handle uneven splits just in case
+
+    for i, class_indices in enumerate(indices_per_class):
         plt.figure(figsize=(10, 6))
-        plt.hist(data, bins=50, color='blue', alpha=0.7)
+        plt.hist(class_indices, bins=50, color='blue', alpha=0.7)
         plt.title(f'Histogram for Class: {classes[i]}')
         plt.xlabel('Values')
         plt.ylabel('Frequency')
         plt.grid(True)
-        
-        # Save the plot
-        output_path = os.path.join(path, f"{classes[i]}.png")
-        plt.savefig(output_path)
-        plt.close()  
 
-    pass
+
+
+def quantize_dataset(vqvae_model, dataset, batch_size=128):
+    """
+    Quantize an entire dataset using the VQVAE model and return the indices.
+
+    Parameters:
+    - vqvae_model: Pre-trained VQVAE model for quantization.
+    - dataset: PyTorch Dataset to be quantized.
+    - batch_size: Batch size for processing.
+
+    Returns:
+    - A list of quantization indices from the VQVAE model.
+    """
+    vqvae_model.eval()  # Set model to evaluation mode
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    all_indices = []
+
+    for data, _ in tqdm(dataloader):
+        data = data.to(device)  # Ensure data is on the same device as model
+        with torch.no_grad():
+            indices = vqvae_model.codebook.quantize_indices(vqvae_model.encode(data))
+        all_indices.extend(indices.cpu().numpy())  # Move indices to CPU and store
+
+    return np.concatenate(all_indices)
+
 
 # Define the plotting function
 def plot_generated_reconstructions(reconstructions, labels, folder, idx, classes):
@@ -233,37 +260,44 @@ if __name__ == "__main__":
     #     plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
 
 
-    real_dataset_path = "src/Saved_datasets/real_dataset.npy"  
-    fake_dataset_path_GPT2 = "src/Saved_datasets/fake_dataset_transformerGPT2.npy" 
-    fake_dataset_path_MONAI = "src/Saved_datasets/fake_dataset_transformerMONAI.npy" 
+    # real_dataset_path = "src/Saved_datasets/real_dataset.npy"  
+    # fake_dataset_path_GPT2 = "src/Saved_datasets/fake_dataset_transformerGPT2.npy" 
+    # fake_dataset_path_MONAI = "src/Saved_datasets/fake_dataset_transformerMONAI.npy" 
 
-    GPT2_Histograms_Path = "EvaluationResults/GPT2_results/CodebookHistograms/" 
-    MONAI_Histograms_Path = "EvaluationResults/Monai_results/CodebookHistograms/" 
+    # GPT2_Histograms_Path = "EvaluationResults/GPT2_results/CodebookHistograms/" 
+    # MONAI_Histograms_Path = "EvaluationResults/Monai_results/CodebookHistograms/" 
 
-    # Save ds_train as a NumPy array
-    #save_torch_dataset_as_numpy(ds_train, real_dataset_path)
+    # # Save ds_train as a NumPy array
+    # #save_torch_dataset_as_numpy(ds_train, real_dataset_path)
 
-    fake_indices_GPT2 = generate_fake_dataset(
-        transformer_model=modelGPT2,
-        vqvae_model=VQVAE,
-        output_file=fake_dataset_path_GPT2,
-        num_labels=6,
-        samples_per_label=1000,
-        signal_length=1024
-    )
-    plot_codebook_histograms(fake_indices_GPT2,GPT2_Histograms_Path)
-    #metrics = compute_metrics(real_dataset_path, fake_dataset_path_GPT2)
-    #print("Computed Metrics GPT2:", metrics)
+    # fake_indices_GPT2 = generate_fake_dataset(
+    #     transformer_model=modelGPT2,
+    #     vqvae_model=VQVAE,
+    #     output_file=fake_dataset_path_GPT2,
+    #     num_labels=6,
+    #     samples_per_label=1000,
+    #     signal_length=1024
+    # )
+    # plot_codebook_histograms(fake_indices_GPT2,GPT2_Histograms_Path)
+    # #metrics = compute_metrics(real_dataset_path, fake_dataset_path_GPT2)
+    # #print("Computed Metrics GPT2:", metrics)
 
 
-    fake_indices_MONAI = generate_fake_dataset(
-        transformer_model=modelTransformer,
-        vqvae_model=VQVAE,
-        output_file=fake_dataset_path_MONAI,
-        num_labels=6,
-        samples_per_label=1000,
-        signal_length=1024
-    )
-    plot_codebook_histograms(fake_indices_MONAI,MONAI_Histograms_Path)
-    #metrics = compute_metrics(real_dataset_path, fake_dataset_path_MONAI)
-    #print("Computed Metrics MONAI:", metrics)
+    # fake_indices_MONAI = generate_fake_dataset(
+    #     transformer_model=modelTransformer,
+    #     vqvae_model=VQVAE,
+    #     output_file=fake_dataset_path_MONAI,
+    #     num_labels=6,
+    #     samples_per_label=1000,
+    #     signal_length=1024
+    # )
+    # plot_codebook_histograms(fake_indices_MONAI,MONAI_Histograms_Path)
+    # #metrics = compute_metrics(real_dataset_path, fake_dataset_path_MONAI)
+    # #print("Computed Metrics MONAI:", metrics)
+
+
+    indices = quantize_dataset(VQVAE, ds_test)
+
+    # Plot and save histograms
+    histogram_path = "EvaluationResults/TestDatasetHistograms/"
+    plot_codebook_histograms(indices, histogram_path)

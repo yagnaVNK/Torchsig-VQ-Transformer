@@ -1,4 +1,4 @@
-device = 'cuda:1'
+device = 'cuda:0'
 devices = [1]
 
 epochs = 10
