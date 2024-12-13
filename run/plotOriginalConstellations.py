@@ -2,56 +2,56 @@ import os
 import matplotlib.pyplot as plt
 import torch
 from src.Dataset import getDataLoader
-
-def plot_signals_by_class(data_loader, classes, folder):
-    # Create the eval folder if it doesn't exist
+from src.utils import *
+from tqdm import tqdm
+def plot_signals_by_class(data_loader, classes, folder, vqvae_model=None):
     os.makedirs(folder, exist_ok=True)
-
-    # Initialize a dictionary to store one signal per class
     class_signals = {cls: None for cls in range(len(classes))}
 
-    # Iterate through the data loader to fetch signals and their labels
-    for signals, labels in data_loader:
+    # Ensure the model is in evaluation mode and moved to the correct device
+    if vqvae_model:
+        vqvae_model = vqvae_model.to(device).eval()
+
+    for signals, labels in tqdm(data_loader):
+        signals = signals.to(device)  # Move signals to GPU if using CUDA
         for signal, label in zip(signals, labels):
             label_idx = label.item()
             if class_signals[label_idx] is None:
-                class_signals[label_idx] = signal
+                if vqvae_model:
+                    with torch.no_grad():
+                        # Ensure signal has correct dimensions: (batch_size, channels, length)
+                        signal = signal.unsqueeze(0)  # Add batch dimension if it's missing
+                        reconstructed = vqvae_model.reconstruct(signal)
+                        class_signals[label_idx] = reconstructed.squeeze(0).cpu().numpy()  # Remove batch dimension for plotting
+                else:
+                    class_signals[label_idx] = signal.cpu().numpy()
 
-        # Break the loop if we have one signal for each class
         if all(val is not None for val in class_signals.values()):
             break
 
-    # Create a figure with subplots
-    cols = 3  # Number of columns in subplot grid
-    rows = (len(classes) + cols - 1) // cols  # Calculate rows needed
-    plt.figure(figsize=(18, 6 * rows))
-
-    # Plot one signal for each class
+    plt.figure(figsize=(18, 6 * ((len(classes) + 2) // 3)))
     for i, (label_idx, signal) in enumerate(class_signals.items()):
-        if signal is not None:
-            ax = plt.subplot(rows, cols, i + 1)
+        ax = plt.subplot((len(classes) + 2) // 3, 3, i + 1)
+        ax.scatter(signal[0], signal[1], alpha=0.7, label=classes[label_idx])
+        ax.set_title(f'{classes[label_idx]}')
+        ax.set_xlabel('Component 1')
+        ax.set_ylabel('Component 2')
+        ax.legend()
 
-            # Assuming signals are IQ samples with shape [2, n_samples]
-            iq_signal = signal.cpu().detach().numpy()
-
-            ax.scatter(iq_signal[0], iq_signal[1], alpha=0.7, label=classes[label_idx])
-            ax.set_title(f'{classes[label_idx]}')
-            ax.set_xlabel('Component 1')
-            ax.set_ylabel('Component 2')
-            ax.legend()
-
-    # Save the plot
-    plt.tight_layout()  # Adjust subplots to fit into the figure area
+    plt.tight_layout()
     plt.savefig(os.path.join(folder, 'signals_by_class.png'))
     plt.close()
 
-# Example usage
-classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
+# Load your VQVAE model correctly and ensure it's ready for inference
+vqvae_model = torch.load(VQVAE_PATH).to(device).eval()
+
+# Define your data loader and classes
 train_dl, ds_train, test_dl, ds_test, val_dl, ds_val = getDataLoader(
     classes=classes,
-    iq_samples=1024,  # Assuming IQ samples length is 1024
-    samples_per_class=1000,  # Number of samples per class
-    batch_size=6  # Batch size to fit 6 classes per plot
+    iq_samples=1024,
+    samples_per_class=1000,
+    batch_size=6
 )
 
-plot_signals_by_class(train_dl, classes, folder="EvaluationResults")
+# Plot the signals
+plot_signals_by_class(train_dl, classes, "EvaluationResults")
