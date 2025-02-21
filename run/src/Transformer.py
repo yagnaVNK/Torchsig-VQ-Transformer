@@ -1,27 +1,22 @@
 
-from src.utils import *
 import torch
 import torch
 import torch.nn as nn 
 from torch.nn import functional as F
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from src.utils import *
-
 class Head(nn.Module):
     """ one head of self-attention """
-
-    def __init__(self, head_size):
+    def __init__(self, n_embd, head_size, block_size, dropout):
         super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-
+        self.register_buffer('tril', torch.tril(torch.ones(block_size + 2, block_size + 2)))
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        B,T,C = x.shape
+        B, T, C = x.shape
         k = self.key(x)   # (B,T,C)
         q = self.query(x) # (B,T,C)
         # compute attention scores ("affinities")
@@ -36,10 +31,12 @@ class Head(nn.Module):
 
 class MultiHeadAttention(nn.Module):
     """ multiple heads of self-attention in parallel """
-
-    def __init__(self, num_heads, head_size):
+    def __init__(self, n_embd, num_heads, block_size, dropout):
         super().__init__()
-        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        head_size = n_embd // num_heads
+        self.heads = nn.ModuleList([
+            Head(n_embd, head_size, block_size, dropout) for _ in range(num_heads)
+        ])
         self.proj = nn.Linear(n_embd, n_embd)
         self.dropout = nn.Dropout(dropout)
 
@@ -50,8 +47,7 @@ class MultiHeadAttention(nn.Module):
 
 class FeedFoward(nn.Module):
     """ a simple linear layer followed by a non-linearity """
-
-    def __init__(self, n_embd):
+    def __init__(self, n_embd, dropout):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(n_embd, 4 * n_embd),
@@ -65,13 +61,10 @@ class FeedFoward(nn.Module):
 
 class Block(nn.Module):
     """ Transformer block: communication followed by computation """
-
-    def __init__(self, n_embd, n_head):
-        # n_embd: embedding dimension, n_head: the number of heads we'd like
+    def __init__(self, n_embd, n_head, block_size, dropout):
         super().__init__()
-        head_size = n_embd // n_head
-        self.sa = MultiHeadAttention(n_head, head_size)
-        self.ffwd = FeedFoward(n_embd)
+        self.sa = MultiHeadAttention(n_embd, n_head, block_size, dropout)
+        self.ffwd = FeedFoward(n_embd, dropout)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
@@ -81,26 +74,37 @@ class Block(nn.Module):
         return x
 
 class TransformerModel(nn.Module):
-
-    def __init__(self):
+    def __init__(self, vocab_size=256, n_embd=256, block_size=352, n_head=8, n_layer=8, dropout=0.1,additional_vocab = 11):
         super().__init__()
         print("Initialized transformer")
-        # each token directly reads off the logits for the next token from a lookup table
-        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
-        self.ln_f = nn.LayerNorm(n_embd) # final layer norm
-        self.lm_head = nn.Linear(n_embd, vocab_size)
+        self.vocab_size = vocab_size
+        self.block_size = block_size
+        self.n_embd = n_embd
+        
+        # Token and position embeddings
+        self.token_embedding_table = nn.Embedding(vocab_size + additional_vocab, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size + 2, n_embd)
+        
+        # Transformer blocks
+        self.blocks = nn.Sequential(*[
+            Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)
+        ])
+        
+        self.ln_f = nn.LayerNorm(n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size + additional_vocab)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
-        # idx and targets are both (B,T) tensor of integers
-        tok_emb = self.token_embedding_table(idx) # (B,T,C)
-        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,C)
-        x = tok_emb + pos_emb # (B,T,C)
-        x = self.blocks(x) # (B,T,C)
-        x = self.ln_f(x) # (B,T,C)
-        logits = self.lm_head(x) # (B,T,vocab_size)
+        
+        # Get embeddings
+        tok_emb = self.token_embedding_table(idx)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device))
+        x = tok_emb + pos_emb
+        
+        # Transform
+        x = self.blocks(x)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
 
         if targets is None:
             loss = None
@@ -113,37 +117,14 @@ class TransformerModel(nn.Module):
         return logits, loss
 
     def generate(self, idx, max_new_tokens):
-        """
-        Generate a sequence of tokens based on the initial context `idx`.
-
-        Args:
-            idx (torch.Tensor): Initial context of shape (B, T) with indices.
-            max_new_tokens (int): Number of tokens to generate.
-
-        Returns:
-            torch.Tensor: Generated sequence of shape (B, T + max_new_tokens).
-        """
-        self.eval()  # Ensure the model is in evaluation mode
-
-        with torch.no_grad():  # Disable gradient computation for inference
+        self.eval()
+        with torch.no_grad():
             for _ in range(max_new_tokens):
-                # Crop `idx` to the last `block_size` tokens for efficient processing
-                idx_cond = idx[:, -block_size:]
-                
-                # Forward pass to get logits
+                idx_cond = idx[:, -self.block_size:]
                 logits, _ = self(idx_cond)
-                
-                # Focus only on the last time step (prediction for the next token)
-                logits = logits[:, -1, :]  # Shape: (B, vocab_size)
-                
-                # Convert logits to probabilities using softmax
-                probs = F.softmax(logits, dim=-1)  # Shape: (B, vocab_size)
-                
-                # Sample the next token from the probability distribution
-                idx_next = torch.multinomial(probs, num_samples=1)  # Shape: (B, 1)
-                
-                # Append the sampled token to the sequence
-                idx = torch.cat((idx, idx_next), dim=1)  # Shape: (B, T + 1)
-
+                logits = logits[:, -1, :]
+                logits[:, self.vocab_size:] = float('-inf')
+                probs = F.softmax(logits, dim=-1)
+                idx_next = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat((idx, idx_next), dim=1)
         return idx
-

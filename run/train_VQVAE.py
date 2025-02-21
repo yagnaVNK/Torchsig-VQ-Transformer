@@ -1,18 +1,22 @@
 from src.VQVAE import VQVAE
-from src.utils import *
 from src.Dataset import getDataLoader
 import lightning.pytorch as pl
 import torch
 
 def train_VQVAE(dl_train,
                     dl_val,
-                    epochs = epochs,
+                    epochs = 15,
                     train_bool= True,
-                    eff_net_PATH = eff_net_PATH,
-                    classes = classes,
-                    in_channels = in_channels):
-    
-    Trainer = pl.Trainer(max_epochs=epochs,logger=None, devices=devices, accelerator = 'gpu')
+                    classes = ["4ask","8pam","16psk","32qam_cross","2fsk","ofdm-256"],
+                    in_channels = 2):
+    enc_hidden_dim = 256
+    dec_hidden_dim = 256
+    num_res_blocks = 2
+    codebook_dim = 256
+    codebook_slots = 64
+
+
+    Trainer = pl.Trainer(max_epochs=epochs,logger=None, devices=2, accelerator = 'gpu')
     vqvae_model = VQVAE(in_feat_dim=in_channels,
                         hidden_dim=enc_hidden_dim,
                         out_feat_dim=dec_hidden_dim,
@@ -25,6 +29,14 @@ def train_VQVAE(dl_train,
 
 if __name__ == '__main__':
 
+    epochs = 15
+    classes = ["4ask","8pam","16psk","32qam_cross","2fsk","ofdm-256"]
+    iq_samples = 1024
+    samples_per_class= 1000
+    batch_size = 32
+    in_channels = 2
+    VQVAE_PATH = 'saved_models/vqvae_monai.pth'
+    
     dl_train, ds_train, dl_test, ds_test, dl_val, ds_val = getDataLoader(
         classes = classes,
         iq_samples = iq_samples,
@@ -38,7 +50,6 @@ if __name__ == '__main__':
                     dl_val=dl_val,
                     epochs = epochs,
                     train_bool= True,
-                    eff_net_PATH = eff_net_PATH,
                     classes = classes,
                     in_channels = in_channels
                     )

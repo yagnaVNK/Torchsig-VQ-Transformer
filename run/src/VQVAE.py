@@ -1,5 +1,3 @@
-
-
 import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
@@ -13,7 +11,6 @@ from torch.optim.lr_scheduler import _LRScheduler
 from sklearn.manifold import TSNE
 import os
 import seaborn as sns
-from timm.scheduler import TanhLRScheduler
 from torchsummary import summary
 
 def mish(x):

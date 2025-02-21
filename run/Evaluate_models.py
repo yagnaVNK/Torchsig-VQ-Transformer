@@ -2,12 +2,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
-from torchvision import transforms
 from tqdm import tqdm  
-from src.VQVAE import *
-from src.utils import *
-from src.Transformer import TransformerModel
-from src.TransformerMonai import MonaiDecoderOnlyModel
 from src.Dataset import getDataLoader
 import matplotlib.pyplot as plot
 import numpy as np
@@ -79,7 +74,7 @@ def save_torch_dataset_as_numpy(dataset, output_file):
     print(f"Dataset saved to {output_file}")
 
 
-def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_labels=6, samples_per_label=500, batch_size=128, signal_length=1024):
+def generate_fake_dataset(transformer_model,is_conditional, vqvae_model, output_file, num_labels=6, BOS_TOKEN = 64, samples_per_label=64, batch_size=64, signal_length=1024):
     """
     Generate a fake dataset using a transformer model and save it as a NumPy array.
     
@@ -99,23 +94,32 @@ def generate_fake_dataset(transformer_model, vqvae_model, output_file, num_label
         print(f"Generating data for label {label}...")
         for _ in tqdm(range(steps_per_label)):
             # Create a batch of the same label
-            label_tensor = torch.tensor([[label]] * batch_size).to(device)
+            if is_conditional:
+                # For conditional models, provide both BOS token and label
+                
+                new_indices = model.generate(torch.tensor([[BOS_TOKEN, BOS_TOKEN + 1 + label]] * batch_size).to(device), max_new_tokens=512)
+                new_indices = new_indices[:,2:]
+            else:
+                # For unconditional models, only provide BOS token
+                new_indices = model.generate(torch.tensor([[BOS_TOKEN]]* batch_size).to(device), max_new_tokens=512)
+                new_indices = new_indices[:,1:]
 
-            # Generate new indices using the transformer model
-            new_indices = transformer_model.generate(
-                label_tensor,
-                max_new_tokens=signal_length // 2
-            )
-            fake_indices.append(new_indices[:,1:].cpu().numpy())
+            # Each new indices shape will be (Batch_Size , 512)
+
+            fake_indices.append(new_indices.cpu().numpy()) 
             # Decode the generated indices into signals
-            reconstructions = vqvae_model.decode(vqvae_model.codebook.lookup(new_indices[:, 1:]))
-
+            reconstructions = vqvae_model.decode(vqvae_model.codebook.lookup(new_indices))
+            
             # Flatten each reconstructed signal and append it to the dataset
             for rec in reconstructions:
+                #print(rec.shape)
                 all_samples.append(rec.cpu().detach().numpy().flatten())
-    
+            print(len(all_samples)) 
+            
     # Convert the list of samples into a NumPy array
     final_dataset = np.array(all_samples)
+    np.save(output_file,final_dataset)
+
     print(f"Generated dataset shape: {final_dataset.shape}")
     
     return fake_indices
@@ -125,29 +129,45 @@ def plot_codebook_histograms(indices, path, num_classes=6, num_tokens=512):
     Plot histograms of the quantization indices from the VQVAE model.
 
     Parameters:
-    - indices: Numpy array of indices obtained from the quantization.
-    - path: Path where the histogram plots will be saved.
-    - num_classes: Number of classes for labeling purposes.
-    - num_tokens: Number of tokens in the VQVAE's codebook.
+    - indices: List of numpy arrays containing the quantization indices
+    - path: Path where the histogram plots will be saved
+    - num_classes: Number of classes for labeling purposes
+    - num_tokens: Number of tokens in the VQVAE's codebook
     """
     os.makedirs(path, exist_ok=True)
     classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
-
-    # Assuming indices is a flat list, we need to split it correctly by class
-    # This requires knowing the distribution of indices by class - the following is a generic handler
-    indices_per_class = np.array_split(indices, num_classes)  # Using array_split to handle uneven splits just in case
-
+    
+    # Convert indices to numpy array if it isn't already
+    indices = np.array(indices)
+    
+    # Reshape indices to ensure they're properly formatted
+    # If indices is a list of arrays, concatenate them first
+    if isinstance(indices, list):
+        indices = np.concatenate(indices)
+    
+    # Ensure indices are 2D: (num_samples, sequence_length)
+    if indices.ndim > 2:
+        indices = indices.reshape(-1, indices.shape[-1])
+    
+    # Split indices into classes
+    samples_per_class = len(indices) // num_classes
+    indices_per_class = np.array_split(indices, num_classes)
+    
     for i, class_indices in enumerate(indices_per_class):
         plt.figure(figsize=(10, 6))
-        plt.hist(class_indices, bins=64, color='blue', alpha=0.7)
+        # Flatten the indices for plotting
+        flat_indices = class_indices.flatten()
+        plt.hist(flat_indices, bins=min(64, len(np.unique(flat_indices))), 
+                color='blue', alpha=0.7)
         plt.title(f'Histogram for Class: {classes[i]}')
-        plt.xlabel('Values')
+        plt.xlabel('Token Index')
         plt.ylabel('Frequency')
         plt.grid(True)
         
         outputpath = os.path.join(path, f"Histogram_Class_{classes[i]}.png")
         plt.savefig(outputpath)
         plt.close()
+        print(f"Saved histogram for class {classes[i]} with shape {class_indices.shape}")
 
 
 
@@ -206,18 +226,41 @@ def plot_generated_reconstructions(reconstructions, labels, folder, idx, classes
     plt.close()
 
 
-
 if __name__ == "__main__":
     # Define the classes
     classes = ["4ask", "8pam", "16psk", "32qam_cross", "2fsk", "ofdm-256"]
+    
+    # Model paths
+    VQVAE_PATH = 'saved_models/vqvae_monai.pth'
+    MONAI_COND_PATH = 'saved_models/MONAI_Cond2_Transformer_epochs_50.pt'
+    MONAI_UNCOND_PATH = 'saved_models/MONAI_Transformer_epochs_50.pt'
+    NANOGPT_COND_PATH = 'saved_models/NanoGPT_Cond2_Transformer_epochs_50.pt'
+    NANOGPT_UNCOND_PATH = 'saved_models/NanoGPT_Transformer_epochs_50.pt'
+    BOS_TOKEN = 64
+    samples_per_class = 2016
+    iq_samples = 1024
+    device = 'cuda:0'
 
-    # Load models
+    
+    # Create base evaluation folder
+    base_eval_folder = 'EvaluationResults'
+    os.makedirs(base_eval_folder, exist_ok=True)
+
+    # Load all models
     VQVAE = torch.load(VQVAE_PATH).to(device)
-    VQVAE.eval()  
-    modelTransformer = torch.load(MONAI_TRANSFORMER_MODEL_PATH).to(device)
-    modelTransformer.eval()
-    modelGPT2 = torch.load(TRANSFORMER_MODEL_PATH).to(device)
-    modelGPT2.eval()
+    VQVAE.eval()
+    
+    monai_cond = torch.load(MONAI_COND_PATH).to(device)
+    monai_uncond = torch.load(MONAI_UNCOND_PATH).to(device)
+    nanogpt_cond = torch.load(NANOGPT_COND_PATH).to(device)
+    nanogpt_uncond = torch.load(NANOGPT_UNCOND_PATH).to(device)
+    
+    all_models = {
+        'MONAI_Conditional': (monai_cond, True),
+        'MONAI_Unconditional': (monai_uncond, False),
+        'NanoGPT_Conditional': (nanogpt_cond, True),
+        'NanoGPT_Unconditional': (nanogpt_uncond, False)
+    }
 
     # Load data
     train_dl, ds_train, test_dl, ds_test, val_dl, ds_val = getDataLoader(
@@ -226,79 +269,66 @@ if __name__ == "__main__":
         samples_per_class=samples_per_class,
         batch_size=4
     )
-  
-    
 
-    # # Generate and plot reconstructions for Transformer model
-    # for j in range(0, 10):
-    #     all_reconstructions = []
-    #     labels = list(range(len(classes)))  # Dynamically adjust based on the number of classes
-    #     for i in labels:
-    #         new_indices = torch.tensor(modelTransformer.generate(torch.tensor([[i]]).to(device), max_new_tokens=512), device=device)
-    #         reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
-    #         all_reconstructions.append(reconstruction.squeeze()) 
+    # Save real dataset if it doesn't exist
+    real_dataset_path = "src/Saved_datasets/real_dataset.npy"
+    if not os.path.exists(real_dataset_path):
+        save_torch_dataset_as_numpy(ds_train, real_dataset_path)
 
-    #     # Stack all reconstructions
-    #     all_reconstructions = torch.stack(all_reconstructions)
-    #     #print(all_reconstructions.shape)
-    #     plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
+    # Process each model
+    for model_name, (model, is_conditional) in all_models.items():
+        print(f"\nProcessing {model_name}...")
+        
+        # Create model-specific folders
+        model_eval_folder = os.path.join(base_eval_folder, f'{model_name}_results')
+        histogram_folder = os.path.join(model_eval_folder, 'CodebookHistograms')
+        os.makedirs(model_eval_folder, exist_ok=True)
+        os.makedirs(histogram_folder, exist_ok=True)
+        
+        # Generate reconstructions
+        for j in range(10):
+            all_reconstructions = []
+            labels = list(range(len(classes)))
+            
+            for i in labels:
+                if is_conditional:
+                    # For conditional models, provide both BOS token and label
+                    new_indices = model.generate(torch.tensor([[BOS_TOKEN, BOS_TOKEN + 1 + i]]).to(device), max_new_tokens=512)
+                    new_indices = new_indices[:,2:]
+                else:
+                    # For unconditional models, only provide BOS token
+                    new_indices = model.generate(torch.tensor([[BOS_TOKEN]]).to(device), max_new_tokens=512)
+                    new_indices = new_indices[:,1:]
+                    
+                new_indices = torch.tensor(new_indices, device=device)
+                
+                reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices))
+                all_reconstructions.append(reconstruction.squeeze())
 
-    # # Changing evaluation folder
-    # eval_folder = f'EvaluationResults/GPT2_results/'
+            all_reconstructions = torch.stack(all_reconstructions)
+            plot_generated_reconstructions(all_reconstructions, labels, model_eval_folder, j, classes)
 
-    # # Generate and plot reconstructions for GPT2 model
-    # for j in range(0, 10):
-    #     all_reconstructions = []
-    #     labels = list(range(len(classes)))
-    #     for i in labels:
-    #         new_indices = torch.tensor(modelGPT2.generate(torch.tensor([[i]]).to(device), max_new_tokens=512), device=device)
-    #         reconstruction = VQVAE.decode(VQVAE.codebook.lookup(new_indices[:, 1:]))
-    #         all_reconstructions.append(reconstruction.squeeze()) 
+        # Generate fake dataset and compute metrics
+        fake_dataset_path = f"src/Saved_datasets/fake_dataset_{model_name}.npy"
+        fake_indices = generate_fake_dataset(
+            transformer_model=model,
+            is_conditional = is_conditional,
+            vqvae_model=VQVAE,
+            output_file=fake_dataset_path,
+            num_labels=6, 
+            BOS_TOKEN = 64, 
+            samples_per_label=samples_per_class, 
+            batch_size=32, 
+            signal_length=1024
+        )
+        # Plot codebook histograms
+        plot_codebook_histograms(fake_indices, histogram_folder)
+        
+        # Compute and print metrics
+        metrics = compute_metrics(real_dataset_path, fake_dataset_path)
+        print(f"Computed Metrics for {model_name}:", metrics)
 
-    #     # Stack all reconstructions
-    #     all_reconstructions = torch.stack(all_reconstructions)
-    #     #print(all_reconstructions.shape)
-    #     plot_generated_reconstructions(all_reconstructions, labels, eval_folder, j, classes)
-
-
-    # real_dataset_path = "src/Saved_datasets/real_dataset.npy"  
-    # fake_dataset_path_GPT2 = "src/Saved_datasets/fake_dataset_transformerGPT2.npy" 
-    # fake_dataset_path_MONAI = "src/Saved_datasets/fake_dataset_transformerMONAI.npy" 
-
-    # GPT2_Histograms_Path = "EvaluationResults/GPT2_results/CodebookHistograms/" 
-    # MONAI_Histograms_Path = "EvaluationResults/Monai_results/CodebookHistograms/" 
-
-    # # Save ds_train as a NumPy array
-    # #save_torch_dataset_as_numpy(ds_train, real_dataset_path)
-
-    # fake_indices_GPT2 = generate_fake_dataset(
-    #     transformer_model=modelGPT2,
-    #     vqvae_model=VQVAE,
-    #     output_file=fake_dataset_path_GPT2,
-    #     num_labels=6,
-    #     samples_per_label=1000,
-    #     signal_length=1024
-    # )
-    # plot_codebook_histograms(fake_indices_GPT2,GPT2_Histograms_Path)
-    # metrics = compute_metrics(real_dataset_path, fake_dataset_path_GPT2)
-    # print("Computed Metrics GPT2:", metrics)
-
-
-    # fake_indices_MONAI = generate_fake_dataset(
-    #     transformer_model=modelTransformer,
-    #     vqvae_model=VQVAE,
-    #     output_file=fake_dataset_path_MONAI,
-    #     num_labels=6,
-    #     samples_per_label=1000,
-    #     signal_length=1024
-    # )
-    # plot_codebook_histograms(fake_indices_MONAI,MONAI_Histograms_Path)
-    # metrics = compute_metrics(real_dataset_path, fake_dataset_path_MONAI)
-    # print("Computed Metrics MONAI:", metrics)
-
-
+    # Process test dataset
+    test_histogram_path = os.path.join(base_eval_folder, "TestDatasetHistograms")
     indices = quantize_dataset(VQVAE, ds_test)
-
-    # Plot and save histograms
-    histogram_path = "EvaluationResults/TestDatasetHistograms/"
-    plot_codebook_histograms(indices, histogram_path)
+    plot_codebook_histograms(indices, test_histogram_path)
