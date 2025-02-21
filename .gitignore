@@ -1,5 +1,6 @@
 /VirtualEnv
 /run/src/SavedModels
+/run/src/saved_models
 /run/src/Saved_datasets
 /run/lightning_logs
 /run/src/__pycache__
@@ -8,3 +9,4 @@
 /run/src/.ipynb_checkpoints/
 /run/__pycache__
 /src/lightning_logs
+*.pt
